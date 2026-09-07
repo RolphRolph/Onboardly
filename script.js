@@ -554,6 +554,21 @@ function bindPhaseOneEvents(){
 const PHASE2_KEY_PREFIX = "onboarding-phase2-v1-";
 const phaseTwoKeyFor = (customerId) => PHASE2_KEY_PREFIX + customerId;
 
+// Beskrivande val för verksamhetsbilden; används inte som automatiska riskgränser.
+const KYC_CUSTOMER_TYPES = [
+  ['private','Privatpersoner'], ['business','Företag'],
+  ['public','Offentlig sektor'], ['organisations','Föreningar och andra organisationer']
+];
+const KYC_PAYMENT_METHODS = [
+  ['bank','Banköverföring/bankgiro'], ['card','Kort'], ['swish','Swish'],
+  ['cash','Kontanter'], ['other','Annat']
+];
+const KYC_PAYMENT_RANGES = [
+  ['upTo5000','Upp till 5 000 kr'], ['5000To30000','5 000–30 000 kr'],
+  ['30000To100000','30 000–100 000 kr'], ['over100000','Över 100 000 kr'],
+  ['varied','Stor variation']
+];
+
 function blankPhaseTwo(){
   return {
     identityVerified: false,
@@ -578,6 +593,15 @@ function blankPhaseTwo(){
     revenueModel: "",
     expectedTransactions: "",
     businessDetailsEditing: true,     // Endast visningsläge; påverkar inte om uppgifterna är ifyllda.
+    businessDescriptionEditing: true,
+    customerTypes: [],
+    paymentMethods: [],
+    otherPaymentMethod: "",
+    otherPaymentMethodEditing: true,
+    paymentRange: "",
+    noCustomerPayments: false,
+    businessNotes: "",
+    businessNotesEditing: true,
 
     pepResult: "",                   // "none" | "hit"
     sanctionsResult: "",             // "none" | "hit"
@@ -608,6 +632,12 @@ function ensurePhaseTwo(data){
     ...base,
     ...d,
     businessDetailsEditing: d.businessDetailsEditing !== false,
+    businessDescriptionEditing: (d.businessDescriptionEditing ?? d.businessDetailsEditing) !== false,
+    customerTypes: KYC_CUSTOMER_TYPES.map(([value])=>value).filter(value=>Array.isArray(d.customerTypes) && d.customerTypes.includes(value)),
+    paymentMethods: KYC_PAYMENT_METHODS.map(([value])=>value).filter(value=>Array.isArray(d.paymentMethods) && d.paymentMethods.includes(value)),
+    noCustomerPayments: d.noCustomerPayments === true,
+    otherPaymentMethodEditing: d.otherPaymentMethodEditing !== false,
+    businessNotesEditing: d.businessNotesEditing !== false,
     beneficialOwnerNameEditing: d.beneficialOwnerNameEditing !== false,
     riskReasonEditing: d.riskReasonEditing !== false,
     identityDetailsEditing: d.identityDetailsEditing !== false,
@@ -794,6 +824,7 @@ function renderPhaseTwoPage(){
   page.innerHTML = `
     <div class="page-eyebrow">Onboarding · Steg 2 av 6</div>
     <h2>Kundkännedom</h2>
+    <p class="block-help"><strong>Stöd för kundkännedom</strong><br>Verktyget hjälper dig att strukturera och dokumentera kundkännedomen. Byrån ansvarar för att uppgifterna och kontrollerna är tillräckliga utifrån kundens risk och uppdraget. Kompletterande underlag och kontroller kan behövas även när alla uppgifter är ifyllda.</p>
     <div class="progress-wrap" id="progress-kundkannedom"><div class="progress-top"><span class="pct-num">${pct}%</span><span class="frac">${counts.done} av ${counts.total} uppgifter ifyllda</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${pctColor(pct)}"></div></div></div>
 
     <section class="phase-block"><div>
@@ -893,23 +924,17 @@ function bindPhaseTwoEvents(){
     phaseTwo.enhancedMeasures[el.dataset.p2Enhanced] = el.checked;
     savePhaseTwo(); renderMain(); renderSidebar();
   }));
-  page.querySelector('[data-business-toggle]')?.addEventListener('click', ()=>{
-    phaseTwo.businessDetailsEditing = !phaseTwo.businessDetailsEditing;
-    savePhaseTwo();
-    refreshTextEditors(phaseTwo.businessDetailsEditing ? '[data-p2-text="businessDescription"]' : '[data-business-toggle]');
-  });
+  page.querySelectorAll('[data-p2-list]').forEach(el=>el.addEventListener('change', ()=>{
+    const key = el.dataset.p2List;
+    phaseTwo[key] = el.checked ? [...new Set([...phaseTwo[key], el.value])] : phaseTwo[key].filter(value=>value!==el.value);
+    savePhaseTwo(); renderMain(); renderSidebar();
+  }));
   bindSavedTextEvents(page);
   bindIdentityDocumentationEvents(page);
 }
 
 
 /* ============ EXTRA TJÄNSTER OCH BESKRIVNINGARNAS LÄSLÄGE ============ */
-const BUSINESS_DETAIL_FIELDS = [
-  {key:'businessDescription',label:'Verksamhet',placeholder:'Kort beskrivning'},
-  {key:'revenueModel',label:'Huvudsakliga intäkter',placeholder:'Hur får företaget sina intäkter?'},
-  {key:'expectedTransactions',label:'Normala transaktioner',placeholder:'Kort beskrivning'}
-];
-
 function otherServiceEditorOpen(){
   return phaseOne.otherServiceEditIndex!==null || !phaseOne.otherServices.length || phaseOne.otherService!=='';
 }
@@ -993,25 +1018,61 @@ function bindOtherServiceEvents(page){
 }
 
 function renderBusinessDetails(){
-  const editing = phaseTwo.businessDetailsEditing;
+  const p = phaseTwo, notes = businessNotesPrompt(p);
+  // Äldre fritext ligger kvar i sina ursprungliga fält och visas utan migrering eller dubbletter.
+  const legacy = [['revenueModel','Tidigare uppgift – Huvudsakliga intäkter'],['expectedTransactions','Tidigare uppgift – Normala transaktioner']]
+    .filter(([key])=>String(p[key] ?? '').trim());
   return `<div class="business-details" data-business-details>
-    ${editing?`<div class="field-grid three kyc-fields">${BUSINESS_DETAIL_FIELDS.map(field=>`<div data-business-detail="${field.key}" id="question-kundkannedom-${field.key}">${kycTextField(field.key,field.label,phaseTwo[field.key],field.placeholder)}</div>`).join('')}</div>`
-      : `<dl class="business-details-summary field-grid three">${BUSINESS_DETAIL_FIELDS.map(field=>`<div data-business-detail="${field.key}" id="question-kundkannedom-${field.key}"><dt>${field.label}</dt><dd>${String(phaseTwo[field.key] ?? '').trim()?safe(phaseTwo[field.key]):'<span class="text-editor-empty">Inte ifyllt</span>'}</dd></div>`).join('')}</dl>`}
-    <div class="text-editor-actions"><button type="button" class="${editing?'text-editor-button':'text-editor-link'}" data-business-toggle>${editing?'Spara':'Ändra'}</button></div>
+    ${renderSavedText('businessDescription')}
+    <div class="mini-question remaining-target" id="question-kundkannedom-noCustomerPayments">${kycCheck('noCustomerPayments','Inga kundbetalningar',p.noCustomerPayments)}</div>
+    ${!p.noCustomerPayments?`
+      ${renderBusinessChoices('customerTypes','Vilka säljer företaget till?',KYC_CUSTOMER_TYPES)}
+      ${renderBusinessChoices('paymentMethods','Hur betalar företagets kunder?',KYC_PAYMENT_METHODS)}
+      ${p.paymentMethods.includes('other')?renderSavedText('otherPaymentMethod'):''}
+      <div class="mini-question"><label class="field"><span>Hur stor är en vanlig kundbetalning?</span>
+        <select data-p2-field="paymentRange" aria-describedby="kyc-payment-range-help">
+          <option value="">Välj intervall</option>
+          ${KYC_PAYMENT_RANGES.map(([value,label])=>`<option value="${value}" ${p.paymentRange===value?'selected':''}>${label}</option>`).join('')}
+        </select>
+      </label><p class="micro-help" id="kyc-payment-range-help">Ange belopp per betalning från kund, inte årsomsättning eller samlade utbetalningar från en betaltjänst.</p></div>
+    `:''}
+    <div class="mini-question">${renderSavedText('businessNotes',{...SAVED_TEXT_FIELDS.businessNotes,label:notes.required?'Kompletterande beskrivning':'Kompletterande beskrivning (frivilligt)',help:notes.help})}</div>
+    ${legacy.length?`<div class="mini-question"><dl class="saved-text-summary">${legacy.map(([key,label])=>`<dt>${label}</dt><dd>${safe(p[key])}</dd>`).join('')}</dl></div>`:''}
   </div>`;
+}
+
+function renderBusinessChoices(key, label, options){
+  return `<div class="mini-question" data-p2-business-group="${key}" role="group" aria-label="${label}">
+    <strong>${label}</strong><div class="service-grid">${options.map(([value,title])=>`<label class="service-option">
+      <input type="checkbox" data-p2-list="${key}" value="${value}" ${phaseTwo[key].includes(value)?'checked':''}>
+      <span class="native-box"></span><span>${title}${key==='paymentMethods' && value==='bank'?'<small class="micro-help"> · Exempelvis betalning av fakturor</small>':''}</span>
+    </label>`).join('')}</div>
+  </div>`;
+}
+
+// Samma villkor används för hjälptext, obligatoriska uppgifter och kundaccept.
+function businessNotesPrompt(p){
+  if(p.noCustomerPayments) return {required:true,help:'Beskriv kort hur verksamheten finansieras.'};
+  if(p.paymentRange==='varied') return {required:true,help:'Beskriv kort hur betalningarnas storlek varierar.'};
+  if(p.paymentRange==='over100000') return {required:true,help:'Ange betalningarnas ungefärliga storleksordning.'};
+  return {required:false,help:'Komplettera vid behov, exempelvis med särskilda betalningsflöden, finansiering eller större utbetalningar.'};
 }
 
 /* Enskilda textvärden delar läsläge och åtgärder; befintlig autosparning används vid inmatning. */
 const SAVED_TEXT_FIELDS = {
+  businessDescription: {label:'Verksamhetsbeskrivning', placeholder:'Kort beskrivning', help:'Beskriv kort vad företaget säljer eller arbetar med.'},
+  otherPaymentMethod: {label:'Beskriv betalningssättet', placeholder:'Annat betalningssätt'},
+  businessNotes: {label:'Kompletterande beskrivning', placeholder:'Beskriv kort'},
   beneficialOwnerName: {label:'Namn på verklig huvudman', placeholder:'Namn'},
   riskReason: {label:'Kort motivering', placeholder:'Motivera bedömningen kort'}
 };
 
-function renderSavedText(key){
-  const field = SAVED_TEXT_FIELDS[key], editing = phaseTwo[`${key}Editing`];
+function renderSavedText(key, field = SAVED_TEXT_FIELDS[key]){
+  const editing = phaseTwo[`${key}Editing`];
   return `<div class="kyc-single-field" data-saved-text="${key}" id="question-kundkannedom-${key}">
     ${editing ? kycTextField(key,field.label,phaseTwo[key],field.placeholder)
       : `<dl class="saved-text-summary"><dt>${field.label}</dt><dd>${String(phaseTwo[key] ?? '').trim()?safe(phaseTwo[key]):'<span class="text-editor-empty">Inte ifyllt</span>'}</dd></dl>`}
+    ${field.help?`<p class="micro-help" id="help-${key}">${safe(field.help)}</p>`:''}
     <div class="text-editor-actions">
       <button type="button" class="${editing?'text-editor-button':'text-editor-link'}" data-saved-text-action="${editing?'save':'edit'}">${editing?'Spara':'Ändra'}</button>
       ${!editing?'<button type="button" class="text-editor-link" data-saved-text-action="delete">Ta bort</button>':''}
@@ -1130,7 +1191,7 @@ function phaseTwoRequirements(data, p1 = phaseOne, includeAcceptance = true){
   const add = (key,label,attribute,done)=>items.push({key,label,selector:`[${attribute}="${key}"]`,done:!!done});
   const check = (key,label)=>add(key,label,'data-p2-check',p[key]);
   const radio = (key,label)=>add(key,label,'data-p2-field',p[key]);
-  const text = (key,label)=>add(key,label,BUSINESS_DETAIL_FIELDS.some(field=>field.key===key)?'data-business-detail':SAVED_TEXT_FIELDS[key]?'data-saved-text':IDENTITY_DETAIL_FIELDS.some(field=>field.key===key)?'data-identity-detail':'data-p2-text',String(p[key] ?? '').trim());
+  const text = (key,label)=>add(key,label,SAVED_TEXT_FIELDS[key]?'data-saved-text':IDENTITY_DETAIL_FIELDS.some(field=>field.key===key)?'data-identity-detail':'data-p2-text',String(p[key] ?? '').trim());
   check('identityVerified','Kund och företrädare identifierade och verifierade');
   text('identitySource','Identitetskontroll – källa');
   text('identityDate','Identitetskontroll – kontrolldatum');
@@ -1145,9 +1206,14 @@ function phaseTwoRequirements(data, p1 = phaseOne, includeAcceptance = true){
     radio('complexOwnership','Komplex eller svåröverskådlig ägarstruktur?');
   }
   check('businessUnderstood','Verksamheten och affärsförbindelsen är tillräckligt förstådda');
-  text('businessDescription','Verksamhet – kort beskrivning');
-  text('revenueModel','Huvudsakliga intäkter');
-  text('expectedTransactions','Normala transaktioner');
+  text('businessDescription','Verksamhetsbeskrivning');
+  if(!p.noCustomerPayments){
+    add('customerTypes','Vilka säljer företaget till?','data-p2-business-group',p.customerTypes.length);
+    add('paymentMethods','Hur betalar företagets kunder?','data-p2-business-group',p.paymentMethods.length);
+    if(p.paymentMethods.includes('other')) text('otherPaymentMethod','Beskriv betalningssättet');
+    add('paymentRange','Hur stor är en vanlig kundbetalning?','data-p2-field',KYC_PAYMENT_RANGES.some(([value])=>value===p.paymentRange));
+  }
+  if(businessNotesPrompt(p).required) text('businessNotes',p.noCustomerPayments?'Beskriv hur verksamheten finansieras':'Kompletterande beskrivning – betalningarnas storlek');
   radio('pepResult','Resultat av PEP/RCA-kontrollen');
   radio('sanctionsResult','Resultat av sanktionskontrollen');
   radio('geographicRisk','Koppling till högriskland eller annan geografisk risk?');
@@ -1230,8 +1296,7 @@ function onRemainingTaskLink(event){
   // Ett länkmål finns i båda lägena; öppna redigeringen innan det saknade fältet fokuseras.
   const identityDocumentation = target.closest('[data-identity-documentation]');
   const savedText = target.closest('[data-saved-text]');
-  const editingKey = identityDocumentation ? 'identityDetailsEditing' : savedText ? `${savedText.dataset.savedText}Editing`
-    : target.closest('[data-business-details]') ? 'businessDetailsEditing' : null;
+  const editingKey = identityDocumentation ? 'identityDetailsEditing' : savedText ? `${savedText.dataset.savedText}Editing` : null;
   if(identityDocumentation){ phaseTwo.identityDocumentationOpen = true; initializeIdentityDate(); }
   if(identityDocumentation || (editingKey && !phaseTwo[editingKey])){
     phaseTwo[editingKey] = true;
