@@ -35,9 +35,6 @@ const SECTIONS = [
   {
     id:"overtag", title:"Övertag & ekonomiskt underlag",
     groups:[
-      {title:"Övertag från tidigare byrå", items:[
-        {id:"previousContact", text:"Tidigare byrå är kontaktad och övertagandet är samordnat", visibleWhen:"previousFirm"}
-      ]},
       {title:"Räkenskapsinformation", items:[
         {id:"bookkeepingData", text:"Bokföringsdata/SIE och nödvändiga bokföringsunderlag är mottagna", visibleWhen:"existing"},
         {id:"annualMaterial", text:"Senaste bokslut/årsredovisning och relevanta deklarationer är mottagna", visibleWhen:"existing"},
@@ -1353,7 +1350,6 @@ function isChecklistItemVisible(item, p1=phaseOne){
   if(!item || typeof item === 'string' || !item.visibleWhen) return true;
   switch(item.visibleWhen){
     case 'existing': return p1.businessStatus === 'existing';
-    case 'previousFirm': return p1.businessStatus === 'existing' && p1.previousFirm === 'yes';
     case 'payroll': return p1.services.includes('payroll');
     case 'foreign': return p1.foreignActivity === 'yes';
     default: return true;
@@ -1381,6 +1377,8 @@ function ensureState(s){
   // Längdkontrollen hindrar att anpassningen upprepas för redan uppdaterad data.
   if(Array.isArray(s.avtal) && s.avtal.length === 10) s.avtal.splice(1, 1);
   if(Array.isArray(s.overtag) && s.overtag.length === 9) s.overtag.splice(1, 3);
+  // Tidigare byråkontakt låg först i Fas 4. Anpassa även äldre data efter steget ovan.
+  if(Array.isArray(s.overtag) && s.overtag.length === 6) s.overtag.splice(0, 1);
   // Fas 5 hade 13 punkter. Ta bort bakifrån så att kvarvarande bockar behåller rätt position.
   if(Array.isArray(s.system) && s.system.length === 13){
     s.system.splice(10, 3);
@@ -1681,12 +1679,7 @@ function renderSectionContext(section){
   if(section.id === 'overtag'){
     if(!phaseOne.businessStatus) return `<div class="info-box">ⓘ Välj nystartad eller befintlig verksamhet i Fas 1 för att anpassa den här fasen.</div>`;
     if(phaseOne.businessStatus === 'new') return `<div class="section-context status-neutral"><strong>⚪ Nystartad verksamhet</strong><p>Historiskt övertag och ingående balanser är inte aktuella. Den praktiska uppsättningen fortsätter i Fas 5.</p></div>`;
-    const previous = phaseOne.previousFirm === 'yes' ? 'Tidigare byrå finns – överlämningspunkterna visas.' : phaseOne.previousFirm === 'no' ? 'Ingen tidigare byrå – endast ekonomiskt underlag och ingående läge visas.' : 'Ange i Fas 1 om kunden har en tidigare redovisningsbyrå för att anpassa övertagandet.';
-    const relevant = [];
-    if(phaseOne.services.includes('vat')) relevant.push('momsperioder');
-    if(phaseOne.services.includes('payroll')) relevant.push('lön/AGI och relevant lönehistorik');
-    if(phaseOne.services.includes('annual')) relevant.push('bokslut/årsredovisning');
-    return `<div class="section-context"><strong>${safe(previous)}</strong>${relevant.length?`<p>Vid övertaget är särskilt ${safe(relevant.join(', '))} relevant utifrån uppdraget.</p>`:''}</div>`;
+    return '';
   }
   if(section.id === 'system'){
     const details = [];
