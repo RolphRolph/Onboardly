@@ -36,10 +36,12 @@
     </button>
   </div>
   <div class="tabs-heading">Faser</div>
-  <nav id="tabs"></nav>
+  <nav id="tabs" aria-label="Arbetsfaser"></nav>
+  <nav id="summary-nav" aria-label="Översikt"></nav>
+  <div class="mobile-navigation"><label for="phase-select">Gå till</label><select id="phase-select"></select></div>
   <div id="sidebar-footer">
     <button id="reset-btn" type="button">Nollställ onboarding för vald kund</button>
-    <div id="save-status">Sparas automatiskt i den här webbläsaren</div>
+    <div id="save-status" role="status" aria-live="polite">Sparas automatiskt i den här webbläsaren</div>
   </div>
 </aside>
 

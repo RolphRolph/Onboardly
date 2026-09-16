@@ -23,7 +23,7 @@ const SECTIONS = [
         {id:"internal", text:"Ansvarig konsult, eventuell ersättare och behov av specialist är hanterade"},
         {id:"communication", text:"Kontaktpersoner och kommunikationskanaler är fastställda"},
         {id:"materialRoutine", text:"Rutin för inskickning av underlag och viktiga deadlines är överenskomna"},
-        {id:"approvalRoutine", text:"Attest- och godkännanderutiner är fastställda, om relevant"}
+        {id:"approvalRoutine", text:"Attest- och godkännanderutiner är fastställda", canExclude:true, help:"Gäller när uppdraget omfattar moment som kunden eller byrån behöver attestera eller godkänna."}
       ]},
       {title:"Administration och avtal", items:[
         {id:"customerCard", text:"Kundkortet är komplett"},
@@ -50,15 +50,15 @@ const SECTIONS = [
     id:"system", title:"Behörigheter, system & dokumentation",
     groups:[
       {title:"Behörigheter", items:[
-        {id:"authorityAccess", text:"Nödvändiga myndighets- och ombudsbehörigheter är på plats"},
-        {id:"bankSystemAccess", text:"Nödvändiga bank- och systembehörigheter är på plats"},
+        {id:"authorityAccess", text:"Nödvändiga myndighets- och ombudsbehörigheter är på plats", canExclude:true, help:"Kontrollera behörigheterna för de myndighetsärenden som ingår i uppdraget. Ej aktuellt om inga sådana behörigheter behövs."},
+        {id:"bankSystemAccess", text:"Nödvändiga bank- och systembehörigheter är på plats", canExclude:true, help:"Kontrollera åtkomsten till de banker och system som byrån ska använda. Ej aktuellt om uppdraget inte kräver sådan åtkomst."},
         {id:"correctAccess", text:"Rätt personer har rätt åtkomst"}
       ]},
       {title:"Systemuppsättning", items:[
-        {id:"baseSetup", text:"Grundinställningar och kontoplan är korrekt konfigurerade"},
+        {id:"baseSetup", text:"Grundinställningar och kontoplan är korrekt konfigurerade", canExclude:true, help:"Kontrollera kunduppgifter, räkenskapsår och kontoplan i de system som byrån ansvarar för. Ej aktuellt om ingen sådan systemuppsättning ingår."},
         {id:"payrollSetup", text:"Lönesystem och relevanta lönebehörigheter är uppsatta", visibleWhen:"payroll"},
         {id:"foreignSetup", text:"Relevant utlandsmoms/OSS eller annan utlandshantering är konfigurerad", visibleWhen:"foreign"},
-        {id:"integrations", text:"Nödvändiga integrationer och specialfunktioner är aktiverade och testade"}
+        {id:"integrations", text:"Nödvändiga integrationer och specialfunktioner är aktiverade och testade", canExclude:true, help:"Kontrollera de kopplingar och specialfunktioner som ingår i kundens uppdrag, exempelvis kassasystem eller e-handel. Gör ett provflöde och kontrollera att uppgifterna kommer fram korrekt. Välj Ej aktuellt om inga sådana funktioner används."}
       ]},
       {title:"Digital dokumenthantering", items:[
         {id:"documentStructure", text:"Kundens dokumentstruktur är upprättad enligt byråns standard"}
@@ -68,13 +68,6 @@ const SECTIONS = [
   {
     id:"uppfoljning", title:"Startklar & uppföljning",
     groups:[
-      {title:"Startklar", items:[
-        {id:"acceptanceAgreement", text:"Kundaccept och uppdragsavtal är klara", disabledWhen:"startPrerequisites"},
-        {id:"openingReady", text:"Nödvändigt underlag och ekonomiskt utgångsläge är kontrollerade", visibleWhen:"existing"},
-        {id:"systemsReady", text:"Behörigheter, system och integrationer fungerar"},
-        {id:"workReady", text:"Ansvar, arbetsrutiner och kommande deadlines är tydliga"},
-        {id:"remaining", text:"Eventuella kvarstående punkter är dokumenterade och har en ansvarig"}
-      ]},
       {title:"Uppföljning efter start", items:[
         {id:"customerFollowup", text:"Kunden är kontaktad och övergången fungerar som förväntat"},
         {id:"routineFollowup", text:"Rutiner för kommunikation och inskickning av material fungerar"},
@@ -121,6 +114,8 @@ const PHASE1_RANGES = {turnover:TURNOVER_RANGES, balance:BALANCE_RANGES, employe
 function blankPhaseOne(){
   return {
     companyType: "",                 // "ab" | "sole"
+    responsibleConsultant: "",       // Frivillig administration, påverkar inte progressionen.
+    plannedStartDate: "",
     businessStatus: "",              // "new" | "existing"
     services: [],                     // bookkeeping, vat, payroll, annual, tax, other
     otherService: "",
@@ -173,6 +168,7 @@ function loadPhaseOneFor(customerId){
 function savePhaseOne(){
   if(!activeCustomerId) return;
   clearUnavailablePhaseOneChoices();
+  if(clearOutdatedExceptions()) saveState();
   try{
     localStorage.setItem(phaseOneKeyFor(activeCustomerId), JSON.stringify(phaseOne));
     setSaveStatus("Sparat automatiskt");
@@ -331,7 +327,7 @@ function getAvailableKRules(p=phaseOne){
   if(p.companyType === 'sole'){
     const k1 = calculateK1Eligibility(p);
     return [
-      {value:'K1', state:k1.status, disabled:k1.status === 'blocked', note:k1.status === 'possible' ? k1.label : `${k1.label}. ${k1.detail}`},
+      {value:'K1', state:k1.status, disabled:k1.status === 'blocked', note:k1.label},
       {value:'K2', state: large.status === 'blocked' ? 'disabled' : 'possible', disabled:large.status === 'blocked', note: large.status === 'blocked' ? 'Ej tillämpligt för större företag' : 'Kan vara möjligt'},
       {value:'K3', state:'possible', note:'Kan vara möjligt'}
     ];
@@ -375,12 +371,6 @@ function clearUnavailablePhaseOneChoices(kRules=getAvailableKRules(), accounting
     }
   });
   return changed;
-}
-
-function calculateSimplifiedAnnualReportEligibility(){
-  if(phaseOne.companyType !== 'sole') return {visible:false};
-  const k1 = calculateK1Eligibility();
-  return {visible:true, status:k1.status, label:k1.label, detail:k1.detail};
 }
 
 function phaseOneCountsOf(data){
@@ -434,7 +424,6 @@ function renderPhaseOnePage(){
   const vat = getAvailableVatPeriods();
   // Kontrollera även äldre sparade val innan markeringar och sammanfattning visas.
   if(clearUnavailablePhaseOneChoices(kRules, accounting, vat)) savePhaseOne();
-  const simplified = calculateSimplifiedAnnualReportEligibility();
   const counts = phaseOneCounts();
   const pct = Math.round((counts.done / counts.total) * 100);
 
@@ -460,7 +449,7 @@ function renderPhaseOnePage(){
     const disabled = r.disabled === true || r.state === 'disabled';
     return `<label class="rule-option ${disabled ? 'is-disabled' : ''} status-${r.state}">
       <input type="radio" name="kRule" data-p1-choice="kRule" value="${r.value}" ${phaseOne.choices.kRule===r.value?'checked':''} ${disabled?'disabled':''}>
-      <span><strong>${r.value}</strong><small>${statusIcon(r.state)} ${safe(r.note)}</small></span>
+      <span><strong>${r.value}${r.value==='K1' && phaseOne.companyType==='sole'?' · Förenklat årsbokslut':''}</strong><small>${statusIcon(r.state)} ${safe(r.note)}</small></span>
     </label>`;
   }).join('');
 
@@ -476,6 +465,11 @@ function renderPhaseOnePage(){
     <div class="page-eyebrow">Onboarding · Steg 1 av 6</div>
     <h2>Företagsuppgifter och uppdragsprofil</h2>
     <div class="progress-wrap" id="progress-kontakt"><div class="progress-top"><span class="pct-num">${pct}%</span><span class="frac">${counts.done} av ${counts.total} uppgifter ifyllda</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${pctColor(pct)}"></div></div></div>
+
+    <section class="phase-block"><div><h3>Planering <span class="optional-tag">Frivilligt</span></h3><div class="field-grid two">
+      <label class="field"><span>Ansvarig konsult</span><input type="text" data-p1-admin="responsibleConsultant" value="${safe(phaseOne.responsibleConsultant)}"></label>
+      <label class="field"><span>Planerat startdatum</span><input type="date" data-p1-admin="plannedStartDate" value="${safe(phaseOne.plannedStartDate)}"></label>
+    </div></div></section>
 
     <section class="phase-block"><div><h3>Företagsform</h3><div class="choice-row">${radioCard('companyType','ab','Aktiebolag',phaseOne.companyType==='ab')}${radioCard('companyType','sole','Enskild näringsverksamhet',phaseOne.companyType==='sole')}</div></div></section>
 
@@ -495,19 +489,19 @@ function renderPhaseOnePage(){
 
     <section class="phase-block"><div><h3>Verksamhetens omfattning</h3><p class="block-help">Ange uppgifterna från befintliga underlag där det är möjligt. Uppgifterna används för att bedöma vilka regler och alternativ som kan vara aktuella för kunden.</p>${phaseOne.businessStatus==='existing'?historical:phaseOne.businessStatus==='new'?`${expected}<div class="info-box">ⓘ Ange uppskattad omfattning om den är känd. Uppgifterna används endast som underlag för regelverksstöd och kan behöva uppdateras när faktisk omfattning är känd.</div>`:`<div class="empty-state">Välj först om verksamheten är nystartad eller befintlig.</div>`}</div></section>
 
-    <section class="phase-block rules"><div><h3>Regelverksstöd</h3><p class="block-help">Detta är automatiskt stöd utifrån uppgifterna ovan. Gör bara ett aktivt val där flera alternativ är möjliga.</p>
+    <section class="phase-block rules"><div><h3>Regelverksstöd</h3><p class="block-help">Möjliga alternativ visas utifrån uppgifterna ovan. Välj det alternativ som ska användas, även om bara ett är möjligt. En grön symbol är stöd för bedömningen, inte ett valt svar.</p>
       ${phaseOne.companyType==='ab'?renderRuleCard('Revisionsplikt',audit):''}
       ${phaseOne.companyType==='ab'?renderRuleCard('Större företag',large):''}
       ${phaseOne.companyType?`<div class="rule-card"><div class="rule-title">K-regelverk</div><div class="rule-options">${kHtml}</div></div>`:''}
       ${phaseOne.businessStatus?`<div class="rule-card status-${accounting.status}"><div class="rule-title">Bokföringsmetod</div><div class="rule-result">${statusIcon(accounting.status)} <strong>${accounting.message}</strong></div><div class="rule-options">${accountingOptions}</div><p class="micro-help">Kontantmetoden kan vara möjlig vid nettoomsättning på högst 3 mkr, under förutsättning att övriga krav är uppfyllda.</p></div>`:''}
       ${vat.visible?`<div class="rule-card status-${vat.status}"><div class="rule-title">Momsperiod</div><div class="rule-result">${statusIcon(vat.status)} <strong>${vat.message}</strong></div>${vatOptions?`<div class="rule-options">${vatOptions}</div>`:''}</div>`:''}
-      ${simplified.visible?renderRuleCard('Förenklat årsbokslut',simplified,'Varför krävs bedömning?'):''}
+      ${phaseOne.companyType==='sole'?`<details class="compact-details"><summary>Om K1 och förenklat årsbokslut</summary><p>${safe(calculateK1Eligibility().detail)}</p></details>`:''}
     </div></section>
 
     <section class="phase-summary"><div class="page-eyebrow">Fas 1 · Sammanfattning</div><h3>Sammanfattning</h3>
       <div class="summary-grid"><span>Företagsform</span><strong>${phaseOne.companyType==='ab'?'Aktiebolag':phaseOne.companyType==='sole'?'Enskild näringsverksamhet':'–'}</strong><span>Verksamhet</span><strong>${phaseOne.businessStatus==='existing'?'Befintlig':phaseOne.businessStatus==='new'?'Nystartad':'–'}</strong><span>Byråns uppdrag</span><strong>${safe(selectedServices)}</strong></div>
-      <h4>Regelverksstöd</h4><div class="summary-grid"><span>Revisionsplikt</span><strong>${phaseOne.companyType==='ab'?statusIcon(audit.status)+' '+safe(audit.label):'Inte aktuellt'}</strong><span>Större företag</span><strong>${phaseOne.companyType==='ab'?statusIcon(large.status)+' '+safe(large.label):'Inte aktuellt'}</strong><span>K-regelverk</span><strong>${safe(kAvailable)}</strong><span>Bokföringsmetod</span><strong>${safe(methodAvailable)}</strong><span>Momsperiod</span><strong>${safe(vatAvailable)}</strong></div>
-      <h4>Mina val</h4><div class="final-choices"><span>K-regelverk: <strong>${safe(phaseOne.choices.kRule||'Inte valt')}</strong></span><span>Bokföringsmetod: <strong>${phaseOne.choices.accountingMethod==='cash'?'Kontantmetoden':phaseOne.choices.accountingMethod==='invoice'?'Faktureringsmetoden':'Inte valt'}</strong></span>${vat.visible?`<span>Momsperiod: <strong>${phaseOne.choices.vatPeriod==='year'?'År':phaseOne.choices.vatPeriod==='quarter'?'Kvartal':phaseOne.choices.vatPeriod==='month'?'Månad':'Inte valt'}</strong></span>`:''}</div>
+      <h4>Möjliga alternativ</h4><div class="summary-grid"><span>Revisionsplikt</span><strong>${phaseOne.companyType==='ab'?statusIcon(audit.status)+' '+safe(audit.label):'Inte aktuellt'}</strong><span>Större företag</span><strong>${phaseOne.companyType==='ab'?statusIcon(large.status)+' '+safe(large.label):'Inte aktuellt'}</strong><span>K-regelverk</span><strong>${safe(kAvailable)}</strong><span>Bokföringsmetod</span><strong>${safe(methodAvailable)}</strong><span>Momsperiod</span><strong>${safe(vatAvailable)}</strong></div>
+      <h4>Valda alternativ</h4><div class="final-choices"><span>K-regelverk: <strong>${safe(phaseOne.choices.kRule||'Inte valt')}</strong></span><span>Bokföringsmetod: <strong>${phaseOne.choices.accountingMethod==='cash'?'Kontantmetoden':phaseOne.choices.accountingMethod==='invoice'?'Faktureringsmetoden':'Inte valt'}</strong></span>${vat.visible?`<span>Momsperiod: <strong>${phaseOne.choices.vatPeriod==='year'?'År':phaseOne.choices.vatPeriod==='quarter'?'Kvartal':phaseOne.choices.vatPeriod==='month'?'Månad':'Inte valt'}</strong></span>`:''}</div>
     </section>`;
   return page;
 }
@@ -522,6 +516,10 @@ function setNestedPhaseOne(path, value){
 function bindPhaseOneEvents(){
   const page = document.getElementById('page-kontakt');
   if(!page) return;
+  page.querySelectorAll('[data-p1-admin]').forEach(el=>el.addEventListener('input',()=>{
+    phaseOne[el.dataset.p1Admin]=el.value;
+    savePhaseOne(); refreshChecklistUI(); renderSidebar();
+  }));
   page.querySelectorAll('[data-p1]').forEach(el=>el.addEventListener('change', ()=>{
     phaseOne[el.dataset.p1] = el.value;
     // Byte av företagsform/status kan göra tidigare slutval ogiltiga; de behålls bara om de fortfarande är valbara.
@@ -618,6 +616,8 @@ function blankPhaseTwo(){
 
     kycSufficient: "",               // "yes" | "no" | "review"
     remainingInvestigation: "",
+    acceptanceReason: "",            // Motivering till ett tidigt avvaktande eller avböjande beslut.
+    acceptanceReasonEditing: true,
     acceptanceDecision: ""           // "accept" | "decline" | "pending"
   };
 }
@@ -693,14 +693,15 @@ function canAcceptCustomer(data = phaseTwo, p1 = phaseOne){
   const p = ensurePhaseTwo(data);
   // Undanta själva beslutet för att undvika ett cirkelberoende med progressionen.
   const ready = phaseTwoRequirements(p, p1, false).every(item=>item.done);
-  if(!ready) return {ready, allowed:false, reason:'Fyll i alla övriga obligatoriska uppgifter i Fas 2 för att välja kundaccept.'};
+  if(!ready) return {ready, allowed:false, reason:'Fyll i alla övriga obligatoriska uppgifter i Fas 2 för att acceptera kunden. Du kan redan nu avvakta eller avböja med en kort motivering.'};
   if(p.kycSufficient !== 'yes') return {ready, allowed:false, reason:'Kundkännedomen måste vara tillräcklig innan kunden kan accepteras.'};
   // Sanktionsindikatorn visas som riskinformation och är ingen separat spärr för kundaccept.
   return {ready, allowed:true, reason:''};
 }
 
 function isAcceptanceDecisionAvailable(decision, acceptance = canAcceptCustomer()){
-  return acceptance.ready && (decision==='accept' ? acceptance.allowed : ['decline','pending'].includes(decision));
+  // Avvakta/avböj får dokumenteras tidigt. Motiveringen räknas separat som obligatorisk.
+  return decision==='accept' ? acceptance.allowed : ['decline','pending'].includes(decision);
 }
 
 function clearUnavailableAcceptanceDecision(){
@@ -751,9 +752,10 @@ function kycCheck(field, label, checked){
 }
 
 function kycEnhancedCheck(field, label){
+  const optional = ['sourceOfFunds','enhancedMonitoring'].includes(field);
   return `<label class="service-option kyc-check">
     <input type="checkbox" data-p2-enhanced="${field}" ${phaseTwo.enhancedMeasures[field]?'checked':''}>
-    <span class="native-box"></span><span>${label}</span>
+    <span class="native-box"></span><span>${label}${optional?' <small class="optional-tag">Vid behov</small>':''}</span>
   </label>`;
 }
 
@@ -808,13 +810,13 @@ function renderPhaseTwoPage(){
   const enhancedHtml = enhancedRequired ? `
     <section class="phase-block kyc-conditional-section"><div>
       <h3>Skärpta åtgärder</h3>
-      <p class="block-help">Visa endast det som behöver göras i det här ärendet. Bocka de åtgärder som faktiskt är relevanta.</p>
+      <p class="block-help">Slutför de obligatoriska åtgärderna. Punkter märkta Vid behov bedöms utifrån ärendet och räknas inte som obligatoriska i verktyget.</p>
       <div class="service-grid single">
         ${kycEnhancedCheck('additionalInformation','Ytterligare information har inhämtats')}
         ${kycEnhancedCheck('risksInvestigated','Identifierade risker har utretts')}
-        ${kycEnhancedCheck('sourceOfFunds','Medlens/tillgångarnas ursprung har utretts när relevant')}
+        ${kycEnhancedCheck('sourceOfFunds','Medlens/tillgångarnas ursprung har utretts')}
         ${kycEnhancedCheck('approval','Nödvändigt godkännande har inhämtats')}
-        ${kycEnhancedCheck('enhancedMonitoring','Förstärkt uppföljning har planerats när relevant')}
+        ${kycEnhancedCheck('enhancedMonitoring','Förstärkt uppföljning har planerats')}
       </div>
     </div></section>` : '';
 
@@ -872,9 +874,10 @@ function renderPhaseTwoPage(){
       <div class="mini-question"><strong>Är kundkännedomen tillräcklig?</strong><div class="choice-row">${kycRadio('kycSufficient','yes','Ja',phaseTwo.kycSufficient)}${kycRadio('kycSufficient','no','Nej',phaseTwo.kycSufficient)}${kycRadio('kycSufficient','review','Ytterligare utredning krävs',phaseTwo.kycSufficient)}</div></div>
       ${phaseTwo.kycSufficient==='review'?`<div class="conditional-block">${kycTextField('remainingInvestigation','Vad återstår?',phaseTwo.remainingInvestigation,'Kort beskrivning')}</div>`:''}
       ${phaseTwo.kycSufficient==='no'?`<div class="alert-box danger">🔴 Kunden kan inte markeras som accepterad innan kundkännedomen är tillräcklig.</div>`:''}
-      <div class="mini-question"><strong>Kundaccept</strong><div class="choice-row">${kycRadio('acceptanceDecision','accept','Kunden accepteras',phaseTwo.acceptanceDecision,!acceptance.allowed)}${kycRadio('acceptanceDecision','decline','Kunden accepteras inte',phaseTwo.acceptanceDecision,!acceptance.ready)}${kycRadio('acceptanceDecision','pending','Beslut avvaktar',phaseTwo.acceptanceDecision,!acceptance.ready)}</div></div>
+      <div class="mini-question"><strong>Kundaccept</strong><div class="choice-row">${kycRadio('acceptanceDecision','accept','Kunden accepteras',phaseTwo.acceptanceDecision,!acceptance.allowed)}${kycRadio('acceptanceDecision','decline','Kunden accepteras inte',phaseTwo.acceptanceDecision)}${kycRadio('acceptanceDecision','pending','Beslut avvaktar',phaseTwo.acceptanceDecision)}</div></div>
+      ${['decline','pending'].includes(phaseTwo.acceptanceDecision)?renderSavedText('acceptanceReason'):''}
       <p class="micro-help" data-acceptance-help ${acceptance.allowed?'hidden':''}>${safe(acceptance.reason)}</p>
-      ${enhancedRequired && !Object.values(phaseTwo.enhancedMeasures).every(Boolean)?`<div class="alert-box warning">🟡 Skärpta åtgärder är aktuella. Kontrollera att relevanta åtgärder ovan är genomförda innan slutligt beslut.</div>`:''}
+      ${enhancedRequired && phaseTwoRequirements(phaseTwo,phaseOne,false).some(item=>item.selector.includes('data-p2-enhanced') && !item.done)?`<div class="alert-box warning">🟡 Skärpta åtgärder är aktuella. Kontrollera att relevanta åtgärder ovan är genomförda innan slutligt beslut.</div>`:''}
     </div></section>
 
     <section class="phase-summary"><div class="page-eyebrow">Fas 2 · Sammanfattning</div><h3>Sammanfattning</h3>
@@ -1061,7 +1064,8 @@ const SAVED_TEXT_FIELDS = {
   otherPaymentMethod: {label:'Beskriv betalningssättet', placeholder:'Annat betalningssätt'},
   businessNotes: {label:'Kompletterande beskrivning', placeholder:'Beskriv kort'},
   beneficialOwnerName: {label:'Namn på verklig huvudman', placeholder:'Namn'},
-  riskReason: {label:'Kort motivering', placeholder:'Motivera bedömningen kort'}
+  riskReason: {label:'Kort motivering', placeholder:'Motivera bedömningen kort'},
+  acceptanceReason: {label:'Motivering till beslutet', placeholder:'Varför avvaktar eller avböjer byrån?'}
 };
 
 function renderSavedText(key, field = SAVED_TEXT_FIELDS[key]){
@@ -1147,7 +1151,7 @@ function bindIdentityDocumentationEvents(page){
 
 /* ============ OBLIGATORISKA UPPGIFTER OCH LÄNKAR ============
    En fråga ger en post, även när den innehåller flera svarsalternativ.
-   Villkorade fält tas med först när de visas. Kundernas lagringsformat ändras inte. */
+   Villkorade fält tas med först när de visas. Befintliga svar och nycklar återanvänds. */
 function requirementCounts(items){
   return {done:items.filter(item=>item.done).length, total:items.length};
 }
@@ -1225,19 +1229,54 @@ function phaseTwoRequirements(data, p1 = phaseOne, includeAcceptance = true){
   radio('kycSufficient','Är kundkännedomen tillräcklig?');
   if(p.kycSufficient==='review') text('remainingInvestigation','Kundkännedom – vad återstår att utreda?');
   if(includeAcceptance) add('acceptanceDecision','Kundaccept','data-p2-field',isAcceptanceDecisionAvailable(p.acceptanceDecision, canAcceptCustomer(p, p1)));
+  if(includeAcceptance && ['decline','pending'].includes(p.acceptanceDecision)) text('acceptanceReason','Kundaccept – motivering till beslutet');
   return items;
 }
 
-function phaseRequirements(section){
-  if(section.id==='kontakt') return phaseOneRequirements(phaseOne);
-  if(section.id==='kundkannedom') return phaseTwoRequirements(phaseTwo);
+function phaseRequirements(section, s=state, p1=phaseOne, p2=phaseTwo){
+  if(section.id==='kontakt') return phaseOneRequirements(p1);
+  if(section.id==='kundkannedom') return phaseTwoRequirements(p2,p1);
   let index = 0;
   return section.groups.flatMap(group=>group.items.map(item=>{
     const current = index++;
     return {key:typeof item==='string'?String(current):item.id, label:checklistItemText(item),
       selector:`[data-section="${section.id}"][data-index="${current}"]`,
-      done:!!(state[section.id] && state[section.id][current]), visible:isChecklistItemVisible(item), blocked:checklistItemDisabled(item)};
+      done:!!(s[section.id] && s[section.id][current]), visible:isChecklistItemVisible(item,p1),
+      excluded:isChecklistItemExcluded(section,item,s,p1)};
   })).filter(item=>item.visible);
+}
+
+/* En gemensam källa för start, sammanfattning och kundkort. Uppföljningen ingår aldrig här. */
+function startReadiness(s=state, p1=phaseOne, p2=phaseTwo){
+  const items = SECTIONS.slice(0,5).flatMap(section=>phaseRequirements(section,s,p1,p2)
+    .filter(item=>!item.excluded).map(item=>({...item,sectionId:section.id,
+      done:item.key==='acceptanceDecision' ? p2.acceptanceDecision==='accept' && canAcceptCustomer(p2,p1).allowed : item.done,
+      label:item.key==='acceptanceDecision' ? 'Kundaccept – kunden behöver vara accepterad' : item.label})));
+  const counts = requirementCounts(items);
+  return {...counts,missing:items.filter(item=>!item.done),ready:items.length>0 && items.every(item=>item.done),
+    pct:counts.total ? Math.round(counts.done/counts.total*100) : 0};
+}
+
+function questionTargetId(sectionId,key){
+  return `question-${sectionId}-${key.replace(/[^a-zA-Z0-9_-]/g,'-')}`;
+}
+
+function requirementLink(sectionId,item,label=item.label){
+  return `<a href="#${questionTargetId(sectionId,item.key)}" data-remaining-link data-target-phase="${sectionId}">${safe(label)}</a>`;
+}
+
+function renderStartStatus(showTasks=false){
+  const ready = startReadiness();
+  const problem = phaseTwo.acceptanceDecision==='decline' || phaseTwo.kycSufficient==='no';
+  const label = ready.ready ? 'Redo att starta' : phaseTwo.acceptanceDecision==='decline' ? 'Kunden accepteras inte'
+    : phaseTwo.acceptanceDecision==='pending' ? 'Beslut avvaktar' : ready.done ? 'Förberedelser pågår' : 'Inte påbörjat';
+  return `<section class="start-status status-${ready.ready?'ready':problem?'problem':ready.done?'progress':'neutral'}" aria-label="Startklarstatus">
+    <h3>${label}</h3><p>${ready.ready?'Alla aktuella startkrav är uppfyllda. Uppföljningen efter start redovisas separat.':`${ready.missing.length} uppgifter eller beslut återstår innan kunden är redo att starta.`}</p>
+    ${showTasks?`<div class="next-steps"><h3>Nästa steg</h3>${ready.ready?'<p>Inga uppgifter blockerar start.</p>':SECTIONS.slice(0,5).map(section=>{
+      const missing=ready.missing.filter(item=>item.sectionId===section.id);
+      return missing.length?`<h4>Fas ${SECTIONS.indexOf(section)+1} · ${section.title}</h4><ul>${missing.map(item=>`<li>${requirementLink(section.id,item)}</li>`).join('')}</ul>`:'';
+    }).join('')}</div>`:''}
+  </section>`;
 }
 
 function refreshRemainingTasks(){
@@ -1250,31 +1289,25 @@ function refreshRemainingTasks(){
       if(!field) return;
       const grouped = field.type==='radio' || field.hasAttribute('data-p1-service');
       const target = grouped ? field.closest('.rule-options, .choice-row, .service-grid')
-        : field.closest('.field, .service-option, .item') || field;
-      if(!target.id) target.id = `question-${section.id}-${item.key.replace(/[^a-zA-Z0-9_-]/g,'-')}`;
+        : field.closest('[data-saved-text], [data-identity-detail], [data-other-services], [data-p2-business-group], .checklist-task')
+          || field.closest('.field, .service-option, .item') || field;
+      if(!target.id) target.id = questionTargetId(section.id,item.key);
       item.targetId = target.id;
       target.classList.add('remaining-target');
       if(grouped){ target.setAttribute('role','group'); target.setAttribute('aria-label',item.label); }
       if(!field.labels?.length && !field.hasAttribute('aria-label')) field.setAttribute('aria-label',item.label);
-      if(field.hasAttribute('data-section')){
-        field.disabled = item.blocked;
-        target.classList.toggle('is-disabled',item.blocked);
-        const note = target.querySelector('.item-note');
-        if(!item.blocked && note) note.remove();
-        if(item.blocked && !note) target.querySelector('.txt').insertAdjacentHTML('beforeend','<small class="item-note">Kräver godkänd kundaccept i Fas 2 och signerat uppdragsavtal i Fas 3.</small>');
-      }
     });
-    const missing = items.filter(item=>!item.done);
+    const missing = items.filter(item=>!item.done && !item.excluded);
     const footerId = 'remaining-'+section.id;
     let footer = page.querySelector('.remaining-tasks');
     if(!footer){
       footer = document.createElement('section'); footer.className = 'remaining-tasks';
       footer.id = footerId; footer.tabIndex = -1; footer.setAttribute('aria-labelledby',footerId+'-title');
-      page.appendChild(footer);
+      page.insertBefore(footer,page.querySelector('.phase-navigation'));
     }
     footer.innerHTML = missing.length ? `<h3 id="${footerId}-title">Kvar att fylla i – ${missing.length} ${missing.length===1?'uppgift':'uppgifter'}</h3>
-      <ul>${missing.map(item=>`<li><a href="#${item.targetId}" data-remaining-link>${safe(item.label)}</a>${item.blocked?'<span class="remaining-note">Kan slutföras efter godkänd kundaccept och signerat uppdragsavtal.</span>':''}</li>`).join('')}</ul>`
-      : `<p id="${footerId}-title" class="remaining-complete">Alla obligatoriska uppgifter i fasen är ifyllda.</p>`;
+      <ul>${missing.map(item=>`<li>${requirementLink(section.id,item)}</li>`).join('')}</ul>`
+      : `<p id="${footerId}-title" class="remaining-complete">${section.id==='overtag' && !phaseOne.businessStatus?'Väntar på uppgifter från Fas 1.':items.length && items.every(item=>item.excluded)?'Alla punkter har bedömts som ej aktuella.':!items.length?'Inga obligatoriska uppgifter är aktuella i fasen.':section.id==='uppfoljning'?'Alla uppföljningsuppgifter är klara.':'Alla aktuella obligatoriska uppgifter i fasen är ifyllda.'}</p>`;
     let jump = page.querySelector('.remaining-jump');
     if(!jump){ jump = document.createElement('p'); jump.className = 'remaining-jump'; page.querySelector('.progress-wrap').appendChild(jump); }
     jump.hidden = !missing.length;
@@ -1287,6 +1320,7 @@ function onRemainingTaskLink(event){
   const link = event.target.closest('a[data-remaining-link]');
   if(!link || !mainEl.contains(link)) return;
   const targetId = link.getAttribute('href').slice(1);
+  if(link.dataset.targetPhase && activeId!==link.dataset.targetPhase) setActive(link.dataset.targetPhase);
   let target = document.getElementById(targetId);
   if(!target) return;
   event.preventDefault();
@@ -1356,22 +1390,34 @@ function isChecklistItemVisible(item, p1=phaseOne){
   }
 }
 function checklistItemText(item){ return typeof item === 'string' ? item : item.text; }
-function visibleFlatIndices(section, p1=phaseOne){
-  const indices = [];
-  let flatIdx = 0;
-  section.groups.forEach(g=>g.items.forEach(item=>{
-    if(isChecklistItemVisible(item, p1)) indices.push(flatIdx);
-    flatIdx++;
-  }));
-  return indices;
+// Undantag knyts till uppdraget. Ändrade styrdata kräver en ny bedömning, utan att dolda bockar raderas.
+function exceptionContext(p1=phaseOne){
+  return JSON.stringify([p1.companyType,p1.businessStatus,[...p1.services].sort(),p1.foreignActivity]);
+}
+function isChecklistItemExcluded(section,item,s=state,p1=phaseOne){
+  return !!item.canExclude && s.notApplicable?.[`${section.id}.${item.id}`]===exceptionContext(p1);
+}
+function clearOutdatedExceptions(){
+  let changed=false;
+  Object.keys(state.notApplicable || {}).forEach(key=>{
+    if(state.notApplicable[key]!==exceptionContext()){ delete state.notApplicable[key]; changed=true; }
+  });
+  return changed;
 }
 function blankState(){
   const s = {};
   SECTIONS.forEach(sec=>{ s[sec.id] = Array.from({length:flatCount(sec)}, ()=>false); });
+  s.notApplicable = {};
   return s;
 }
 function ensureState(s){
   s = s && typeof s === 'object' ? s : {};
+  s.notApplicable = s.notApplicable && typeof s.notApplicable==='object' && !Array.isArray(s.notApplicable) ? s.notApplicable : {};
+  // Fas 6: de fem tidigare startbockarna arkiveras; uppföljningens fyra bockar behåller ordningen.
+  if(Array.isArray(s.uppfoljning) && s.uppfoljning.length===9){
+    s.legacyStartChecks = s.uppfoljning.slice(0,5);
+    s.uppfoljning = s.uppfoljning.slice(5);
+  }
   // Äldre checklistor hade 10 punkter i Fas 3 och 9 i Fas 4. Ta bort endast
   // de utgångna positionerna så att kvarvarande punkter behåller rätt bockar.
   // Längdkontrollen hindrar att anpassningen upprepas för redan uppdaterad data.
@@ -1399,25 +1445,15 @@ function ensureState(s){
 function sectionPctOf(s, section, p1=phaseOne){
   // Övertaget är ännu inte bedömt när verksamhetsstatus saknas i Fas 1.
   if(section.id==='overtag' && !p1.businessStatus) return 0;
-  const arr = (s && s[section.id]) || [];
-  const visible = visibleFlatIndices(section, p1);
-  if(visible.length===0) return 100;
-  const done = visible.filter(i=>!!arr[i]).length;
-  return Math.round((done/visible.length)*100);
+  const counts = sectionCountsOf(s,section,p1);
+  return counts.total ? Math.round(counts.done/counts.total*100) : 100;
 }
 function sectionCountsOf(s, section, p1=phaseOne){
-  const arr = (s && s[section.id]) || [];
-  const visible = visibleFlatIndices(section, p1);
-  const done = visible.filter(i=>!!arr[i]).length;
-  return {done, total:visible.length};
+  const items=phaseRequirements(section,s,p1);
+  return {...requirementCounts(items.filter(item=>!item.excluded)),excluded:items.filter(item=>item.excluded).length};
 }
-function overallPctOf(s){
-  let done=0, total=0;
-  SECTIONS.forEach(sec=>{
-    const c = sectionCountsOf(s, sec);
-    done+=c.done; total+=c.total;
-  });
-  return total===0?0:Math.round((done/total)*100);
+function overallPctOf(s,p1=phaseOne,p2=phaseTwo){
+  return startReadiness(s,p1,p2).pct;
 }
 function sectionPct(section){
   if(section.id === 'kontakt'){ const c = phaseOneCounts(); return Math.round((c.done/c.total)*100); }
@@ -1430,19 +1466,17 @@ function sectionCounts(section){
   return sectionCountsOf(state, section);
 }
 function overallPct(){
-  let done=0,total=0;
-  SECTIONS.forEach(sec=>{ const c=sectionCounts(sec); done+=c.done; total+=c.total; });
-  return total===0?0:Math.round((done/total)*100);
+  return startReadiness().pct;
 }
 
 function pctColor(pct){
-  const r1=166,g1=59,b1=50; // red
-  const r2=63,g2=122,b2=87; // green
-  const t = Math.max(0, Math.min(100,pct))/100;
-  const r = Math.round(r1+(r2-r1)*t);
-  const g = Math.round(g1+(g2-g1)*t);
-  const b = Math.round(b1+(b2-b1)*t);
-  return `rgb(${r},${g},${b})`;
+  return pct>=100 ? 'var(--green)' : pct>0 ? 'var(--brass)' : 'var(--text-dim)';
+}
+
+function sectionProgressText(section,counts=sectionCounts(section)){
+  if(section.id==='overtag' && !phaseOne.businessStatus) return 'Väntar på uppgifter från Fas 1';
+  if(!counts.total) return counts.excluded ? `${counts.excluded} ej aktuella` : 'Ej aktuell';
+  return `${section.id==='uppfoljning'?'Uppföljning: ':''}${counts.done}/${counts.total} klara${counts.excluded?` · ${counts.excluded} ej aktuella`:''}`;
 }
 
 /* ============ PERSISTENCE (localStorage — this file runs standalone in the browser) ============ */
@@ -1488,12 +1522,7 @@ function getCustomerOverallPct(customerId){
   const customerState = loadStateFor(customerId);
   const customerPhaseOne = loadPhaseOneFor(customerId);
   const customerPhaseTwo = loadPhaseTwoFor(customerId);
-  let done=0,total=0;
-  SECTIONS.forEach(sec=>{
-    const c = sec.id === 'kontakt' ? phaseOneCountsOf(customerPhaseOne) : sec.id === 'kundkannedom' ? phaseTwoCountsOf(customerPhaseTwo, customerPhaseOne) : sectionCountsOf(customerState, sec, customerPhaseOne);
-    done += c.done; total += c.total;
-  });
-  return total===0 ? 0 : Math.round((done/total)*100);
+  return overallPctOf(customerState,customerPhaseOne,customerPhaseTwo);
 }
 
 /* ============ CUSTOMER ACTIONS ============ */
@@ -1581,8 +1610,8 @@ function renderClientButton(){
     clientActionLabel.textContent = 'Byt ›';
     clientProgress.hidden = false;
     clientProgressMeta.textContent = view !== 'checklist' || activeId === 'summary' || phaseIndex < 0
-      ? `${progress} % klart`
-      : `Fas ${phaseIndex + 1} av ${SECTIONS.length} · ${progress} % klart`;
+      ? `${progress} % av förberedelserna klara`
+      : `Fas ${phaseIndex + 1} av ${SECTIONS.length} · ${progress} % inför start`;
     clientProgressFill.style.width = progress + '%';
     clientProgressFill.style.background = pctColor(progress);
   }else{
@@ -1599,6 +1628,7 @@ function renderClientButton(){
 }
 
 function renderSidebar(){
+  const focusedId = document.activeElement?.closest('.tab-btn')?.dataset.id;
   tabsEl.innerHTML = "";
   const hasActive = !!activeCustomerId;
   tabsEl.classList.toggle('disabled', !hasActive);
@@ -1609,59 +1639,40 @@ function renderSidebar(){
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (view==='checklist' && s.id===activeId ? ' active':'');
     btn.dataset.id = s.id;
+    btn.disabled = !hasActive;
+    if(view==='checklist' && s.id===activeId) btn.setAttribute('aria-current','page');
     btn.innerHTML = `
       <span class="num">${String(idx+1).padStart(2,'0')}</span>
       <span class="ring" style="--pct:${pct}; --ringcolor:${pctColor(pct)}"><span>${pct}</span></span>
-      <span class="label"><span class="t">${s.title}</span><span class="f">${c.total===0?'Ej aktuell':`${c.done}/${c.total} klara`}</span></span>
+      <span class="label"><span class="t">${s.title}</span><span class="f">${sectionProgressText(s,c)}${s.id==='uppfoljning'?` · ${startReadiness().ready?'Redo att starta':'Start återstår'}`:''}</span></span>
     `;
     btn.addEventListener('click', ()=>{ if(hasActive) setActive(s.id); });
     tabsEl.appendChild(btn);
   });
 
   const op = overallPct();
-  const total = SECTIONS.reduce((n,s)=>n+sectionCounts(s).total,0);
-  const done = SECTIONS.reduce((n,s)=>n+sectionCounts(s).done,0);
+  const {total,done} = startReadiness();
   const sBtn = document.createElement('button');
   sBtn.className = 'tab-btn summary-btn' + (view==='checklist' && activeId==='summary' ? ' active':'');
   sBtn.dataset.id = 'summary';
+  sBtn.disabled = !hasActive;
+  if(view==='checklist' && activeId==='summary') sBtn.setAttribute('aria-current','page');
   sBtn.innerHTML = `
-    <span class="num">${String(SECTIONS.length+1).padStart(2,'0')}</span>
     <span class="ring" style="--pct:${op}; --ringcolor:${pctColor(op)}"><span>${op}</span></span>
-    <span class="label"><span class="t">Sammanfattning</span><span class="f">${done}/${total} totalt</span></span>
+    <span class="label"><span class="t">Sammanfattning</span><span class="f">${done}/${total} inför start</span></span>
   `;
   sBtn.addEventListener('click', ()=>{ if(hasActive) setActive('summary'); });
-  tabsEl.appendChild(sBtn);
+  document.getElementById('summary-nav').replaceChildren(sBtn);
+  const select = document.getElementById('phase-select');
+  select.innerHTML = SECTIONS.map((s,i)=>`<option value="${s.id}">Fas ${i+1} · ${s.title}</option>`).join('')+'<option value="summary">Sammanfattning</option>';
+  select.value = activeId; select.disabled = !hasActive;
+  if(focusedId) document.querySelector(`.tab-btn[data-id="${focusedId}"]`)?.focus({preventScroll:true});
 
   document.getElementById('reset-btn').disabled = !hasActive;
   renderClientButton();
 }
 
 /* ============ RENDER: CHECKLIST PAGES ============ */
-function findChecklistIndex(sectionId, itemId){
-  const section = SECTIONS.find(s=>s.id===sectionId);
-  if(!section) return -1;
-  let index = 0;
-  for(const group of section.groups){
-    for(const item of group.items){
-      if(typeof item !== 'string' && item.id === itemId) return index;
-      index++;
-    }
-  }
-  return -1;
-}
-function isChecklistChecked(sectionId, itemId){
-  const index = findChecklistIndex(sectionId,itemId);
-  return index >= 0 && !!(state[sectionId] && state[sectionId][index]);
-}
-function checklistItemDisabled(item){
-  if(!item || typeof item === 'string' || !item.disabledWhen) return false;
-  if(item.disabledWhen === 'startPrerequisites'){
-    const accepted = phaseTwo.acceptanceDecision === 'accept' && canAcceptCustomer().allowed;
-    return !(accepted && isChecklistChecked('avtal','agreementSigned'));
-  }
-  return false;
-}
-
 function selectedServiceNames(labels={bookkeeping:'Bokföring',vat:'Moms',payroll:'Lön/AGI',annual:'Bokslut/årsredovisning',tax:'Inkomstdeklaration',other:'Annat'}){
   return phaseOne.services.flatMap(v=>{
     if(v!=='other') return [labels[v] || v];
@@ -1677,7 +1688,7 @@ function renderSectionContext(section){
     return `<div class="section-context"><strong>Uppdrag från Fas 1</strong><div class="context-chips">${services.length ? services.map(x=>`<span>${safe(x)}</span>`).join('') : '<span>Inga tjänster valda ännu</span>'}</div><p>Detaljer om ansvar och rutiner behöver bara omfatta de tjänster som faktiskt ingår i uppdraget.</p></div>`;
   }
   if(section.id === 'overtag'){
-    if(!phaseOne.businessStatus) return `<div class="info-box">ⓘ Välj nystartad eller befintlig verksamhet i Fas 1 för att anpassa den här fasen.</div>`;
+    if(!phaseOne.businessStatus) return `<div class="info-box"><strong>Väntar på uppgifter från Fas 1</strong><p>${requirementLink('kontakt',{key:'businessStatus',label:'Välj verksamhetens status i Fas 1'})} för att anpassa den här fasen.</p></div>`;
     if(phaseOne.businessStatus === 'new') return `<div class="section-context status-neutral"><strong>⚪ Nystartad verksamhet</strong><p>Historiskt övertag och ingående balanser är inte aktuella. Den praktiska uppsättningen fortsätter i Fas 5.</p></div>`;
     return '';
   }
@@ -1690,119 +1701,64 @@ function renderSectionContext(section){
   return '';
 }
 
-function groupCounts(section, groupIndex){
-  let offset = 0;
-  for(let i=0;i<groupIndex;i++) offset += section.groups[i].items.length;
-  const arr = state[section.id] || [];
-  const visible = section.groups[groupIndex].items
-    .map((item,ii)=>({item,index:offset+ii}))
-    .filter(x=>isChecklistItemVisible(x.item));
-  return {done:visible.filter(x=>!!arr[x.index]).length,total:visible.length};
-}
-
-function renderSectionFooter(section){
-  if(section.id !== 'uppfoljning') return '';
-  const start = groupCounts(section,0);
-  const customerAccepted = phaseTwo.acceptanceDecision === 'accept' && canAcceptCustomer().allowed;
-  const phase3 = sectionCounts(SECTIONS.find(s=>s.id==='avtal'));
-  const phase4 = sectionCounts(SECTIONS.find(s=>s.id==='overtag'));
-  const phase5 = sectionCounts(SECTIONS.find(s=>s.id==='system'));
-  const implementationReady = [phase3,phase4,phase5].every(c=>c.total===0 || c.done===c.total);
-  let cls='status-blocked', icon='🔴', label='Inte startklar';
-  if(customerAccepted && implementationReady && start.total > 0 && start.done === start.total){ cls='status-possible'; icon='🟢'; label='Startklar'; }
-  else if(customerAccepted && (start.done > 0 || phase3.done > 0 || phase5.done > 0)){ cls='status-review'; icon='🟡'; label='Pågående – kvarstående åtgärder'; }
-  let reason = `${start.done} av ${start.total} startkontroller klara.`;
-  if(!customerAccepted) reason = 'Kundaccept behöver vara klar i Fas 2 innan kunden kan markeras som startklar.';
-  else if(!implementationReady) reason = 'Relevanta arbetsmoment i Fas 3–5 behöver slutföras innan slutstatus kan bli Startklar.';
-  return `<div class="rule-card ${cls} start-ready-card"><div class="rule-title">Onboardingstatus</div><div class="rule-result">${icon} <strong>${label}</strong></div><p class="micro-help">${safe(reason)}</p></div>`;
-}
 
 function renderSectionPage(section){
   const page = document.createElement('div');
-  page.className = 'page';
-  page.id = 'page-'+section.id;
-
-  const pct = sectionPct(section);
-  const c = sectionCounts(section);
-
-  let groupsHtml = "";
-  section.groups.forEach((g, gi)=>{
-    let offset = 0;
-    for(let i=0;i<gi;i++) offset += section.groups[i].items.length;
-    let itemsHtml = "";
-    g.items.forEach((item, ii)=>{
-      if(!isChecklistItemVisible(item)) return;
-      const flatIdx = offset+ii;
-      const checked = (state[section.id] && state[section.id][flatIdx]) ? 'checked' : '';
-      const disabled = checklistItemDisabled(item);
-      itemsHtml += `
-        <label class="item ${disabled?'is-disabled':''}">
-          <input type="checkbox" data-section="${section.id}" data-index="${flatIdx}" ${checked} ${disabled?'disabled':''}>
-          <span class="box">${checkSvg}</span>
-          <span class="txt">${safe(checklistItemText(item))}${disabled?'<small class="item-note">Kräver godkänd kundaccept i Fas 2 och signerat uppdragsavtal i Fas 3.</small>':''}</span>
-        </label>
-      `;
-    });
-    if(!itemsHtml) return;
-    const headHtml = g.title ? `<div class="group-head">${g.label? `<span class="gnum">${g.label}</span>`:""}<span class="gtitle">${g.title}</span></div>` : '';
-    groupsHtml += `<div class="group">${headHtml}${itemsHtml}</div>`;
-  });
-
-  const progressText = c.total ? `${c.done} av ${c.total} punkter avklarade` : 'Inte aktuell för den här kunden';
-  page.innerHTML = `
-    <div class="page-eyebrow">Onboarding · Steg ${SECTIONS.findIndex(s=>s.id===section.id)+1} av ${SECTIONS.length}</div>
+  page.className = 'page'; page.id = 'page-'+section.id;
+  const pct = sectionPct(section), c = sectionCounts(section);
+  const followup = section.id==='uppfoljning';
+  let index=0;
+  const groupsHtml=section.groups.map(group=>{
+    const items=group.items.map(item=>{
+      const current=index++;
+      if(!isChecklistItemVisible(item)) return '';
+      const excluded=isChecklistItemExcluded(section,item);
+      const checked=!!state[section.id]?.[current] && !excluded;
+      const targetId=questionTargetId(section.id,item.id);
+      return `<div class="checklist-task ${excluded?'is-excluded':''}" id="${targetId}">
+        <label class="item"><input type="checkbox" data-section="${section.id}" data-index="${current}" ${checked?'checked':''} ${excluded?'disabled':''} ${item.help?`aria-describedby="${targetId}-help"`:''}>
+        <span class="box">${checkSvg}</span><span class="txt">${safe(checklistItemText(item))}</span></label>
+        ${item.help?`<p class="item-help" id="${targetId}-help">${safe(item.help)}</p>`:''}
+        ${item.canExclude?`<label class="not-applicable-choice"><input type="checkbox" data-na-section="${section.id}" data-na-item="${item.id}" ${excluded?'checked':''}> Ej aktuellt</label>`:''}
+        ${excluded?'<span class="task-status">Ej aktuell</span>':''}
+      </div>`;
+    }).join('');
+    return items?`<div class="group">${group.title && !followup?`<div class="group-head"><span class="gtitle">${group.title}</span></div>`:''}${items}</div>`:'';
+  }).join('');
+  page.innerHTML=`<div class="page-eyebrow">Onboarding · Steg ${SECTIONS.indexOf(section)+1} av ${SECTIONS.length}</div>
     <h2>${section.title}</h2>
-    <div class="progress-wrap" id="progress-${section.id}">
-      <div class="progress-top">
-        <span class="pct-num">${pct}%</span>
-        <span class="frac">${progressText}</span>
-      </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${pctColor(pct)}"></div></div>
-    </div>
-    ${renderSectionContext(section)}
-    ${groupsHtml || '<div class="empty-state">Inga arbetsmoment är aktuella i den här fasen utifrån uppgifterna i Fas 1.</div>'}
-    ${renderSectionFooter(section)}
+    ${followup?`<div class="readiness-panel">${renderStartStatus(true)}</div><h3 class="followup-title">Uppföljning efter start</h3><p class="block-help">Följ upp hur arbetet fungerar efter starten. Uppföljningen påverkar inte om kunden är redo att starta.</p>`:''}
+    <div class="progress-wrap" id="progress-${section.id}"><div class="progress-top"><span class="pct-num">${pct}%</span><span class="frac">${sectionProgressText(section,c)}</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${pctColor(pct)}"></div></div></div>
+    ${renderSectionContext(section)}${groupsHtml}
   `;
   return page;
 }
+
 
 function renderSummaryPage(){
   const page = document.createElement('div');
-  page.className = 'page';
-  page.id = 'page-summary';
-
-  const op = overallPct();
-  const total = SECTIONS.reduce((n,s)=>n+sectionCounts(s).total,0);
-  const done = SECTIONS.reduce((n,s)=>n+sectionCounts(s).done,0);
-  const activeCustomer = customers.find(c=>c.id===activeCustomerId);
-
-  let rows = "";
-  SECTIONS.forEach(s=>{
-    const pct = sectionPct(s);
-    const c = sectionCounts(s);
-    rows += `
-      <div class="sum-row" data-id="${s.id}">
-        <span class="sname">${s.title}</span>
-        <span class="sbar"><span class="sbar-fill" style="width:${pct}%; background:${pctColor(pct)}"></span></span>
-        <span class="sfrac">${c.total===0?'Ej aktuell':`${c.done}/${c.total}`}</span>
-      </div>
-    `;
-  });
-
-  page.innerHTML = `
-    <div class="page-eyebrow">Onboarding · Översikt</div>
-    <h2>Sammanfattning${activeCustomer ? ' – '+safe(activeCustomer.name) : ''}</h2>
-    <div class="summary-hero">
-      <div class="big-ring" style="--pct:${op}; --ringcolor:${pctColor(op)}"><span class="num">${op}%</span></div>
-      <div class="cap">Total färdigställd onboarding</div>
-      <div class="sub">${done} av ${total} punkter avklarade över samtliga faser</div>
-    </div>
-    <div id="sum-rows">${rows}</div>
-  `;
+  page.className = 'page'; page.id = 'page-summary';
+  const ready=startReadiness(), activeCustomer=customers.find(c=>c.id===activeCustomerId);
+  const row=section=>{
+    const pct=sectionPct(section);
+    return `<button type="button" class="sum-row" data-go-phase="${section.id}">
+      <span class="sname">${section.id==='uppfoljning'?'Uppföljning efter start':section.title}</span>
+      <span class="sbar" aria-hidden="true"><span class="sbar-fill" style="width:${pct}%;background:${pctColor(pct)}"></span></span>
+      <span class="sfrac">${sectionProgressText(section)}</span></button>`;
+  };
+  page.innerHTML=`<div class="page-eyebrow">Onboarding · Översikt</div>
+    <h2>Sammanfattning${activeCustomer?' – '+safe(activeCustomer.name):''}</h2>
+    <div class="summary-actions"><button type="button" class="text-editor-button" data-print-report>Skriv ut / spara som PDF</button></div>
+    <div class="summary-grid"><span>Ansvarig konsult</span><strong>${safe(phaseOne.responsibleConsultant || 'Inte angivet')}</strong><span>Planerat startdatum</span><strong>${safe(phaseOne.plannedStartDate || 'Inte angivet')}</strong></div>
+    <div class="summary-hero"><div class="big-ring" style="--pct:${ready.pct};--ringcolor:${pctColor(ready.pct)}"><span class="num">${ready.pct}%</span></div>
+      <div class="cap">Förberedelser inför start</div><div class="sub">${ready.done} av ${ready.total} startkrav uppfyllda. Uppföljningen redovisas separat.</div></div>
+    ${renderStartStatus(true)}
+    <h3>Arbetsfaser inför start</h3><div id="sum-rows">${SECTIONS.slice(0,5).map(row).join('')}</div>
+    <div class="followup-summary"><h3>Uppföljning efter start</h3>${row(SECTIONS[5])}</div>`;
   return page;
 }
 
-/* ============ RENDER: CUSTOMERS PAGE ============ */
 function renderCustomersPage(){
   const page = document.createElement('div');
   page.className = 'page active';
@@ -1818,13 +1774,15 @@ function renderCustomersPage(){
       const dateStr = new Date(c.createdAt).toLocaleDateString('sv-SE');
       listHtml += `
         <div class="client-card" data-id="${c.id}">
+          <button type="button" class="client-open" data-open-customer="${c.id}" aria-label="Öppna ${safe(c.name)}">
           <span class="cring" style="--pct:${pct}; --ringcolor:${pctColor(pct)}"><span>${pct}%</span></span>
           <span class="cinfo">
-            <div class="cname">${safe(c.name)}</div>
-            <div class="cmeta">Skapad ${dateStr}</div>
+            <span class="cname">${safe(c.name)}</span>
+            <span class="cmeta">${pct}% inför start · Skapad ${dateStr}</span>
           </span>
           <span class="copen">Öppna checklista ›</span>
-          <button class="cdel" type="button" data-del="${c.id}">Ta bort</button>
+          </button>
+          <button class="cdel" type="button" data-del="${c.id}" aria-label="Ta bort ${safe(c.name)}">Ta bort</button>
         </div>
       `;
     });
@@ -1850,6 +1808,7 @@ const mainEl = document.getElementById('main');
 function renderMain(){
   // Fångar även nya villkor från Fas 1 och otillåtna beslut hos en återöppnad kund.
   if(view==='checklist' && clearUnavailableAcceptanceDecision()) savePhaseTwo();
+  if(view==='checklist' && clearOutdatedExceptions()) saveState();
   // Behåll fokus på samma fråga när ett svar uppdaterar de villkorade fälten.
   const focused = document.activeElement;
   const focusTargetId = mainEl.contains(focused) ? focused.closest('.remaining-target')?.id : null;
@@ -1869,11 +1828,8 @@ function renderMain(){
       const warning = document.getElementById('duplicate-client-warning');
       if(warning) warning.hidden = true;
     });
-    mainEl.querySelectorAll('.client-card').forEach(card=>{
-      card.addEventListener('click', (e)=>{
-        if(e.target.closest('[data-del]')) return;
-        openCustomer(card.dataset.id);
-      });
+    mainEl.querySelectorAll('[data-open-customer]').forEach(button=>{
+      button.addEventListener('click', ()=>openCustomer(button.dataset.openCustomer));
     });
     mainEl.querySelectorAll('[data-del]').forEach(btn=>{
       btn.addEventListener('click', (e)=>{
@@ -1892,6 +1848,11 @@ function renderMain(){
     mainEl.appendChild(page);
   });
   refreshRemainingTasks();
+  SECTIONS.forEach((section,index)=>{
+    document.getElementById('page-'+section.id).insertAdjacentHTML('beforeend',`<nav class="phase-navigation" aria-label="Byt arbetsfas">
+      ${index?`<button type="button" class="text-editor-button" data-go-phase="${SECTIONS[index-1].id}">‹ Föregående fas</button>`:'<span></span>'}
+      <button type="button" class="text-editor-button" data-go-phase="${index<SECTIONS.length-1?SECTIONS[index+1].id:'summary'}">${index<SECTIONS.length-1?'Nästa fas ›':'Till sammanfattningen ›'}</button></nav>`);
+  });
   const summaryPage = renderSummaryPage();
   if(activeId==='summary') summaryPage.classList.add('active');
   mainEl.appendChild(summaryPage);
@@ -1908,9 +1869,6 @@ function renderMain(){
     const control = controls.find(el=>el.value===focusValue) || controls[0];
     if(control) control.focus({preventScroll:true});
   }
-  mainEl.querySelectorAll('.sum-row').forEach(row=>{
-    row.addEventListener('click', ()=> setActive(row.dataset.id));
-  });
 }
 
 function onToggle(e){
@@ -1922,45 +1880,25 @@ function onToggle(e){
   renderSidebar();
 }
 
+
 function refreshChecklistUI(){
   refreshCustomerAcceptanceUI();
-  SECTIONS.forEach(s=>{
-    const wrap = document.getElementById('progress-'+s.id);
-    if(wrap){
-      const pct = sectionPct(s);
-      const c = sectionCounts(s);
-      wrap.querySelector('.pct-num').textContent = pct+'%';
-      wrap.querySelector('.frac').textContent = c.total ? `${c.done} av ${c.total} ${['kontakt','kundkannedom'].includes(s.id)?'uppgifter ifyllda':'punkter avklarade'}` : 'Inte aktuell för den här kunden';
-      const fill = wrap.querySelector('.bar-fill');
-      fill.style.width = pct+'%';
-      fill.style.background = pctColor(pct);
-    }
+  SECTIONS.forEach(section=>{
+    const wrap=document.getElementById('progress-'+section.id);
+    if(!wrap) return;
+    const pct=sectionPct(section);
+    wrap.querySelector('.pct-num').textContent=pct+'%';
+    wrap.querySelector('.frac').textContent=sectionProgressText(section);
+    const fill=wrap.querySelector('.bar-fill');
+    fill.style.width=pct+'%'; fill.style.background=pctColor(pct);
   });
   refreshRemainingTasks();
-  const readyCard = document.querySelector('.start-ready-card');
-  if(readyCard) readyCard.outerHTML = renderSectionFooter(SECTIONS.find(s=>s.id==='uppfoljning'));
-  const summaryPage = document.getElementById('page-summary');
-  if(summaryPage){
-    const op = overallPct();
-    const total = SECTIONS.reduce((n,s)=>n+sectionCounts(s).total,0);
-    const done = SECTIONS.reduce((n,s)=>n+sectionCounts(s).done,0);
-    const ring = summaryPage.querySelector('.big-ring');
-    if(ring){
-      ring.style.setProperty('--pct', op);
-      ring.style.setProperty('--ringcolor', pctColor(op));
-      ring.querySelector('.num').textContent = op+'%';
-      summaryPage.querySelector('.sub').textContent = `${done} av ${total} punkter avklarade över samtliga faser`;
-    }
-    SECTIONS.forEach(s=>{
-      const row = summaryPage.querySelector(`.sum-row[data-id="${s.id}"]`);
-      if(row){
-        const pct = sectionPct(s);
-        const c = sectionCounts(s);
-        row.querySelector('.sbar-fill').style.width = pct+'%';
-        row.querySelector('.sbar-fill').style.background = pctColor(pct);
-        row.querySelector('.sfrac').textContent = c.total ? `${c.done}/${c.total}` : 'Ej aktuell';
-      }
-    });
+  const readyPanel=document.querySelector('.readiness-panel');
+  if(readyPanel) readyPanel.innerHTML=renderStartStatus(true);
+  const oldSummary=document.getElementById('page-summary');
+  if(oldSummary){
+    const next=renderSummaryPage(); next.classList.toggle('active',activeId==='summary');
+    oldSummary.replaceWith(next);
   }
 }
 
@@ -1975,10 +1913,15 @@ function setActive(id){
     renderMain();
   }
 
-  document.querySelectorAll('.tab-btn').forEach(b=> b.classList.toggle('active', b.dataset.id===activeId));
+  document.querySelectorAll('.tab-btn').forEach(b=>{
+    b.classList.toggle('active',b.dataset.id===activeId);
+    if(b.dataset.id===activeId) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+  });
+  document.getElementById('phase-select').value=activeId;
   document.querySelectorAll('.page').forEach(p=> p.classList.remove('active'));
   const target = document.getElementById('page-'+activeId);
   if(target) target.classList.add('active');
+  if(target){ const heading=target.querySelector('h2'); heading.tabIndex=-1; heading.focus({preventScroll:true}); }
   renderClientButton();
   mainEl.scrollTop = 0;
 }
@@ -1990,8 +1933,79 @@ function fullRender(){
   mainEl.scrollTop = 0;
 }
 
+/* Utskriften använder aktuella svar och samma krav/status som gränssnittet. Ingen extern tjänst. */
+function printRequirementValue(item,page){
+  if(item.key==='otherService') return phaseOne.otherServices.join(', ');
+  const nodes=[...page.querySelectorAll(item.selector)];
+  const controls=nodes.flatMap(node=>node.matches('input,select,textarea')?[node]:[...node.querySelectorAll('input,select,textarea')]);
+  if(controls.some(el=>el.type==='radio' || el.type==='checkbox')){
+    const selected=controls.filter(el=>el.checked);
+    return selected.map(el=>{
+      const label=el.closest('label');
+      return (label?.querySelector('strong')?.textContent || label?.textContent || el.value).trim().replace(/\s+/g,' ');
+    }).join(', ');
+  }
+  if(controls[0]) return controls[0].tagName==='SELECT' ? controls[0].value ? controls[0].selectedOptions[0].textContent : '' : controls[0].value;
+  return nodes[0]?.querySelector('dd')?.textContent || '';
+}
+
+function preparePrintReport(){
+  document.getElementById('print-report')?.remove();
+  if(!activeCustomerId || view!=='checklist') return;
+  const customer=customers.find(c=>c.id===activeCustomerId), ready=startReadiness();
+  const report=document.createElement('article'); report.id='print-report';
+  const row=(label,value)=>`<tr><th scope="row">${safe(label)}</th><td>${safe(value || 'Inte ifyllt')}</td></tr>`;
+  report.innerHTML=`<h1>Onboardly · ${safe(customer?.name)}</h1>
+    <p>Utskrivet ${new Date().toLocaleDateString('sv-SE')} · Förberedelser inför start: ${ready.pct}%</p>
+    <table>${row('Ansvarig konsult',phaseOne.responsibleConsultant)}${row('Planerat startdatum',phaseOne.plannedStartDate)}${row('Kundaccept',customerAcceptanceLabel())}</table>
+    ${renderStartStatus(true)}
+    ${SECTIONS.map((section,index)=>{
+      const page=document.getElementById('page-'+section.id), items=phaseRequirements(section);
+      const extra=[];
+      if(section.id==='kundkannedom'){
+        extra.push(row('Inga kundbetalningar',phaseTwo.noCustomerPayments?'Ja':'Nej'));
+        if(phaseTwo.businessNotes && !items.some(item=>item.key==='businessNotes')) extra.push(row('Kompletterande beskrivning (frivilligt)',phaseTwo.businessNotes));
+        [['revenueModel','Tidigare uppgift – Huvudsakliga intäkter'],['expectedTransactions','Tidigare uppgift – Normala transaktioner']].forEach(([key,label])=>{
+          if(phaseTwo[key]) extra.push(row(label,phaseTwo[key]));
+        });
+        if(isEnhancedDueDiligenceRequired()) [['sourceOfFunds','Medlens ursprung'],['enhancedMonitoring','Förstärkt uppföljning']].forEach(([key,label])=>{
+          extra.push(row(label+' (vid behov)',phaseTwo.enhancedMeasures[key]?'Genomförd':'Inte markerad'));
+        });
+        extra.push(row('Riskindikatorer',getKycRiskIndicators().join(', ') || 'Inga angivna indikatorer'));
+      }
+      return `<section><h2>Fas ${index+1} · ${section.title}</h2><p>${safe(sectionProgressText(section))}</p>
+        ${items.length?`<table><thead><tr><th>Uppgift</th><th>Svar / status</th></tr></thead><tbody>${items.map(item=>{
+          const value=index<2?printRequirementValue(item,page):'';
+          const status=item.excluded?'Ej aktuell':item.done?(index<2?'Ifylld':'Genomförd'):'Återstår';
+          return row(item.label,item.excluded?status:value?`${value} · ${status}`:status);
+        }).join('')}${extra.join('')}</tbody></table>`:''}</section>`;
+    }).join('')}`;
+  document.body.appendChild(report);
+}
+
 /* ============ EVENTS ============ */
 mainEl.addEventListener('click', onRemainingTaskLink);
+mainEl.addEventListener('click',event=>{
+  const phaseButton=event.target.closest('[data-go-phase]');
+  if(phaseButton) setActive(phaseButton.dataset.goPhase);
+  if(event.target.closest('[data-print-report]')){ preparePrintReport(); window.print(); }
+});
+mainEl.addEventListener('change',event=>{
+  const input=event.target.closest('[data-na-section]');
+  if(!input) return;
+  const section=SECTIONS.find(s=>s.id===input.dataset.naSection);
+  const item=section?.groups.flatMap(g=>g.items).find(i=>i.id===input.dataset.naItem);
+  if(!item?.canExclude) return;
+  const key=`${section.id}.${item.id}`;
+  if(input.checked){
+    state.notApplicable[key]=exceptionContext();
+    state[section.id][section.groups.flatMap(g=>g.items).indexOf(item)]=false;
+  }else delete state.notApplicable[key];
+  saveState(); renderMain(); renderSidebar();
+  document.querySelector(`[data-na-section="${section.id}"][data-na-item="${item.id}"]`)?.focus({preventScroll:true});
+});
+document.getElementById('phase-select').addEventListener('change',event=>setActive(event.target.value));
+window.addEventListener('beforeprint',preparePrintReport);
 clientBtn.addEventListener('click', ()=>{
   if(activeCustomerId) openCustomer(activeCustomerId);
   else goToCustomerList();
